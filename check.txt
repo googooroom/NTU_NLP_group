@@ -1,0 +1,6 @@
+testing	0
+i dont know	0
+good morning	1
+hello	1
+bye!	0
+so far so good	1
