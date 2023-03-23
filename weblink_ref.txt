@@ -1,0 +1,5 @@
+https://huggingface.co/transformers/v3.0.2/model_doc/gpt2.html#gpt2lmheadmodel
+https://pypi.org/project/datasets/
+https://huggingface.co/docs/transformers/v4.27.2/en/training#train-with-pytorch-trainer
+https://huggingface.co/docs/transformers/v4.27.2/en/tasks/sequence_classification
+
