@@ -7,52 +7,69 @@ import torch
 from sklearn.metrics import accuracy_score
 
 
-
-
-# Validation function
-def validate_epoch(model,tokenizer, dataloader, device):
+def validate_epoch(model, dataloader, tokenizer, max_len, device):
     model.eval()
     total_loss = 0.0
     total_accuracy = 0.0
+    total_samples = 0
+    
     with torch.no_grad():
         for batch in dataloader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
+            text_input = batch["text_input"]
+            label = batch["label"]
+            
+            # Tokenize the text_input
+            encoding = tokenizer(text_input, add_special_tokens=True, truncation=True, padding='max_length', max_length=max_len, return_tensors='pt')
+            
+            input_ids = encoding['input_ids'].to(device)
+            attention_mask = encoding['attention_mask'].to(device)
+            
+            # Convert labels to tensor and move to device
+            labels = label.clone().detach().to(device)
 
-            outputs = model(input_ids, attention_mask, labels)
+            outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
             loss = outputs.loss
             total_loss += loss.item()
-        # Generate predictions
+
+            # Generate predictions
             predicted_tokens = outputs.logits.argmax(dim=-1)
 
-            # Decode the predicted tokens and labels
-            predicted_labels = tokenizer.batch_decode(predicted_tokens, skip_special_tokens=True)
-            true_labels = [tokenizer.decode(label[label != -100], skip_special_tokens=True) for label in labels]
-
-
             # Calculate the accuracy
-            accuracy = sum([1 if pred == true else 0 for pred, true in zip(predicted_labels, true_labels)]) / len(predicted_labels)
-            total_accuracy += accuracy
+            batch_size = len(labels)
+            accuracy = (predicted_tokens == labels).sum().item() / batch_size
+            total_accuracy += accuracy * batch_size
+            total_samples += batch_size
 
     average_loss = total_loss / len(dataloader)
-    average_accuracy = total_accuracy / len(dataloader)
+    average_accuracy = total_accuracy / total_samples
+    
+        
+    gc.collect()
+    torch.cuda.empty_cache()
+
     return average_loss, average_accuracy
 
 
-
-def train_epoch(model, tokenizer, dataloader, optimizer, device):
+def train_epoch(model, dataloader, optimizer, scheduler, tokenizer, max_len, device):
     model.train()
     total_loss = 0.0
     total_accuracy = 0.0
+    total_samples = 0
     for batch in dataloader:
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        labels = batch['labels'].to(device)
+        text_input = batch["text_input"]
+        label = batch["label"]
         
+        # Tokenize the text_input
+        encoding = tokenizer(text_input, add_special_tokens=True, truncation=True, padding='max_length', max_length=max_len, return_tensors='pt')
         
+        input_ids = encoding['input_ids'].to(device)
+        attention_mask = encoding['attention_mask'].to(device)
+        
+        # Convert labels to tensor and move to device
+        labels = label.clone().detach().to(device)
+                
         optimizer.zero_grad()
-        outputs = model.forward(input_ids, attention_mask, labels)
+        outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
 
         loss = outputs.loss
         loss.backward()
@@ -60,95 +77,61 @@ def train_epoch(model, tokenizer, dataloader, optimizer, device):
 
         total_loss += loss.item()
 
-          # Generate predictions
+        # Generate predictions
         predicted_tokens = outputs.logits.argmax(dim=-1)
-        
-        # Decode the predicted tokens and labels
-        predicted_labels = tokenizer.batch_decode(predicted_tokens, skip_special_tokens=True)
-        true_labels = [tokenizer.decode(label[label != -100], skip_special_tokens=True) for label in labels]
-        
-        # Calculate the accuracy
-        accuracy = sum([1 if pred == true else 0 for pred, true in zip(predicted_labels, true_labels)]) / len(predicted_labels)
-        total_accuracy += accuracy
 
+        # Calculate the accuracy
+        batch_size = len(labels)
+        accuracy = (predicted_tokens == labels).sum().item() / batch_size
+        total_accuracy += accuracy * batch_size
+        total_samples += batch_size
+        
+    scheduler.step()
     average_loss = total_loss / len(dataloader)
-    average_accuracy = total_accuracy / len(dataloader)
+    average_accuracy = total_accuracy / total_samples
+        
+    gc.collect()
+    torch.cuda.empty_cache()
+
     return average_loss, average_accuracy
 
-def train(soft_prompt_model, tokenizer,train_dataloader, val_dataloader, optimizer, epochs):
+
+
+def train(soft_prompt_model, train_dataloader, val_dataloader, optimizer, scheduler, tokenizer, max_len, epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     soft_prompt_model.to(device)
     for epoch in range(epochs):
-        train_loss, train_accuracy = train_epoch(soft_prompt_model, tokenizer, train_dataloader, optimizer, device)
-        val_loss, val_accuracy = validate_epoch(soft_prompt_model, tokenizer, val_dataloader, device)
-        print(f'Epoch {epoch + 1}/{epochs} -- Training Loss: {train_loss:.4f} -- Training Accuracy: {train_accuracy:.4f} -- Validation Loss: {val_loss:.4f} -- Validation Accuracy: {val_accuracy:.4f}')
+        train_loss, train_accuracy = train_epoch(soft_prompt_model, train_dataloader, optimizer, scheduler, tokenizer, max_len, device)
+        val_loss, val_accuracy = validate_epoch(soft_prompt_model, val_dataloader, tokenizer, max_len, device)
+        print(f'Epoch {epoch + 1}/{epochs} -- LR: {scheduler.get_last_lr()[0]:.6f} -- Training Loss: {train_loss:.4f} -- Training Accuracy: {train_accuracy:.4f} -- Validation Loss: {val_loss:.4f} -- Validation Accuracy: {val_accuracy:.4f}')
     
     
     gc.collect()
     torch.cuda.empty_cache()
-# def evalute(tesr, model, optimizer, scheduler, epochs):
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     model.to(device)
+
     
-#     for epoch in range(epochs):
-#         train_loss = 0
-#         train_acc = 0
-#         train_examples = 0 
-        
-#         val_examples = 0 
-#         val_loss = 0
-#         val_acc = 0 
-        
-#         model.train()
-      
+    
+    
+def test_epoch(model, dataloader, tokenizer,device):
+    model.eval()
+    total_accuracy = 0.0
+    total_samples = 0
+    with torch.no_grad():
+        for batch in dataloader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
 
-#         for step, batch in enumerate(train_loader):
-#             input_ids = batch["input_ids"].to(device)
-#             labels = batch["label"].to(device)
+            outputs = model(input_ids, attention_mask)
 
-#             optimizer.zero_grad()
-#             outputs = model(input_ids=input_ids, labels=labels)
-#             loss = outputs.loss
-#             loss.backward()
-#             optimizer.step()
+            # Generate predictions
+            predicted_tokens = outputs.logits.argmax(dim=-1)
 
-#             logits = outputs.logits
-#             preds = torch.argmax(logits, dim=1)
+            # Calculate the accuracy
+            batch_size = len(labels)
+            accuracy = (predicted_tokens == labels).sum().item() / batch_size
+            total_accuracy += accuracy * batch_size
+            total_samples += batch_size
 
-#             train_acc += torch.sum(preds == labels).item()
-
-#             train_loss += loss.item() * input_ids.size(0)
-#             train_examples += input_ids.size(0)
-
-#         train_loss /= train_examples
-#         train_acc /= train_examples
-
-#         model.eval()
-#         for batch in val_loader:
-#             input_ids = batch["input_ids"].to(device)
-#             labels = batch["label"].to(device)
-#             batch_size = input_ids.size(0)
-
-#             outputs = model(input_ids=input_ids, labels=labels)
-#             loss = outputs.loss
-
-#             logits = outputs.logits
-#             preds = torch.argmax(logits, dim=1)
-
-#             val_acc += torch.sum(preds == labels).item()
-
-#             val_loss += loss.item() * batch_size
-#             val_examples += batch_size
-            
-#         val_loss /= val_examples
-#         val_acc /= val_examples
-
-#         print(f"Epoch: {(epoch+1):d}/{epochs:d}.. Learning Rate: {scheduler.get_last_lr()[0]:.7f}.. Train Loss : {train_loss:.4f}.. Train Acc: {train_acc:.4f}.. Val Loss : {val_loss:.4f}.. Val Acc: {val_acc:.4f}")
-
-#         gc.collect()
-#         torch.cuda.empty_cache()
-#         scheduler.step()
-
-
-
-
+    average_accuracy = total_accuracy / total_samples
+    return average_accuracy
