@@ -25,7 +25,9 @@ def main(args):
     tokenizer = RobertaTokenizer.from_pretrained("roberta-large")
 
     # Initialize the soft prompt model
-    # model = SoftPromptTuning(model, args.prompt_length)
+    if args.apply_soft_prompt:
+        model = SoftPromptTuning(model, args.prompt_length)
+    
     
     train_val_dataset = TweetDisasterDataset(args.train_path)
     num_train, num_val = round(0.8 * len(train_val_dataset)), round(0.2 * len(train_val_dataset))
@@ -77,6 +79,9 @@ def parse_args(args):
                         help="learning rate for Adam optimizer")
     parser.add_argument("--prompt_length", type=int, default=20,
                     help="Length of the soft prompt") 
+    
+    parser.add_argument("--apply_soft_prompt", type=bool, default=True,
+                    help="use soft prompt tuning")   
     args = parser.parse_args()
 
     return args
