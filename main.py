@@ -40,8 +40,8 @@ def main(args):
     elif args.net == 'bert': # bert not tested
         pretrain_name = 'bert-base-uncased'
         config = BertConfig.from_pretrained(pretrain_name, num_labels=labels)
-        model = RobertaForSequenceClassification.from_pretrained(pretrain_name, config=config)
-        tokenizer = RobertaTokenizer.from_pretrained(pretrain_name)
+        model = BertForSequenceClassification.from_pretrained(pretrain_name, config=config)
+        tokenizer = BertTokenizer.from_pretrained(pretrain_name)
 
     # config.num_labels = 2
 
