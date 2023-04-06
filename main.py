@@ -2,7 +2,9 @@ import torch
 from torch.utils.data import DataLoader, random_split
 from transformers import RobertaForSequenceClassification, RobertaTokenizer
 from transformers import AdamW, get_linear_schedule_with_warmup
-from transformers import BertTokenizer, BertForSequenceClassification, T5Tokenizer, T5ForConditionalGeneration, RobertaTokenizer, RobertaForSequenceClassification, RobertaConfig
+from transformers import BertTokenizer, BertForSequenceClassification, BertConfig, T5Tokenizer, T5ForConditionalGeneration, \
+    RobertaTokenizer, RobertaForSequenceClassification, RobertaConfig, \
+    GPT2Config, GPT2Tokenizer, GPT2ForSequenceClassification
 
 import argparse
 import sys
@@ -12,39 +14,66 @@ from train import *
 from model import *
 
 def main(args):
-    
+
     torch.manual_seed(0)
     torch.backends.cudnn.deterministic = True
 
-    # Create the model instance
-    config = RobertaConfig.from_pretrained("roberta-large")
-    config.num_labels = 2
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load the pre-trained model and tokenizer
-    model = RobertaForSequenceClassification.from_pretrained("roberta-large", config=config)
-    tokenizer = RobertaTokenizer.from_pretrained("roberta-large")
+    labels = 2
+    print('--Load Models')
+    # Create the model instance
+    if args.net == 'roberta':
+        pretrain_name = 'roberta-large'
+        config = RobertaConfig.from_pretrained(pretrain_name, num_labels=labels)
+        model = RobertaForSequenceClassification.from_pretrained(pretrain_name, config=config)
+        tokenizer = RobertaTokenizer.from_pretrained(pretrain_name)
+    elif args.net == 'gpt2':
+        pretrain_name = 'gpt2'
+        config = GPT2Config.from_pretrained(pretrain_name, num_labels=labels)
+        model = GPT2ForSequenceClassification.from_pretrained(pretrain_name, config=config)
+        tokenizer = GPT2Tokenizer.from_pretrained(pretrain_name)
+        tokenizer.pad_token = tokenizer.eos_token
+        model.resize_token_embeddings(len(tokenizer))
+        model.config.pad_token_id = model.config.eos_token_id
+
+    elif args.net == 'bert': # bert not tested
+        pretrain_name = 'bert-base-uncased'
+        config = BertConfig.from_pretrained(pretrain_name, num_labels=labels)
+        model = RobertaForSequenceClassification.from_pretrained(pretrain_name, config=config)
+        tokenizer = RobertaTokenizer.from_pretrained(pretrain_name)
+
+    # config.num_labels = 2
+
+    # Load the pre-trained model and tokenizer    
+    # model = RobertaForSequenceClassification.from_pretrained("roberta-large", config=config)
+    # tokenizer = RobertaTokenizer.from_pretrained("roberta-large")
 
     # Initialize the soft prompt model
-    if args.apply_soft_prompt:
+    if args.apply_soft_prompt:        
         model = SoftPromptTuning(model, args.prompt_length)
+
     
+    print('--Load data')
     
     train_val_dataset = TweetDisasterDataset(args.train_path)
     num_train, num_val = round(0.8 * len(train_val_dataset)), round(0.2 * len(train_val_dataset))
     train_dataset, val_dataset = random_split(train_val_dataset, [num_train, num_val])
-    
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True, drop_last=False)
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=args.epochs)
+
+    print('--Begin Training')
     
     train(model, train_loader, val_loader, optimizer, scheduler, tokenizer, args.max_len, args.epochs)
     if args.test:
         test_dataset = TweetDisasterDataset(args.test_path)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True, drop_last=False)
     
-        test_accuracy = test_epoch(model, test_loader, tokenizerdevice)
+        test_accuracy = test_epoch(model, test_loader, tokenizer, device)
         print(f"Test accuracy: {test_accuracy:.4f}")
 
     
@@ -80,8 +109,13 @@ def parse_args(args):
     parser.add_argument("--prompt_length", type=int, default=20,
                     help="Length of the soft prompt") 
     
-    parser.add_argument("--apply_soft_prompt", type=bool, default=True,
+    # apply --apply_soft_prompt will become true in cmd line
+    parser.add_argument("--apply_soft_prompt", default=False, action='store_true',
                     help="use soft prompt tuning")   
+    
+    parser.add_argument("--net", type=str, default='roberta',
+                    help="set the pretrained model [roberta, gpt2, bert-base-uncased]") 
+    
     args = parser.parse_args()
 
     return args
