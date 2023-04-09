@@ -100,19 +100,45 @@ def train_epoch(model, dataloader, optimizer, scheduler, tokenizer, max_len, dev
 def train(soft_prompt_model, train_dataloader, val_dataloader, optimizer, scheduler, tokenizer, max_len, epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     soft_prompt_model.to(device)
+    
+    total_train_loss = []
+    total_val_loss = []
+    total_train_acc = []
+    total_val_acc = []
+
     for epoch in range(epochs):
         train_loss, train_accuracy = train_epoch(soft_prompt_model, train_dataloader, optimizer, scheduler, tokenizer, max_len, device)
         val_loss, val_accuracy = validate_epoch(soft_prompt_model, val_dataloader, tokenizer, max_len, device)
+
         print(f'Epoch {epoch + 1}/{epochs} -- LR: {scheduler.get_last_lr()[0]:.6f} -- Training Loss: {train_loss:.4f} -- Training Accuracy: {train_accuracy:.4f} -- Validation Loss: {val_loss:.4f} -- Validation Accuracy: {val_accuracy:.4f}')
-    
+        total_train_loss.append(train_loss)
+        total_train_acc.append(train_accuracy)
+        total_val_loss.append(val_loss)
+        total_val_acc.append(val_accuracy)
     
     gc.collect()
     torch.cuda.empty_cache()
 
+    return {
+        "train_acc": total_train_acc,
+        "train_loss": total_train_loss,
+        "val_acc": total_val_acc,
+        "val_loss": total_val_loss,
+    }
+
+
+# Run model on validation set to get accuracy result
+def evaluate_base(model, val_dataloader, max_len, tokenizer):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    val_loss, val_accuracy = validate_epoch(model, val_dataloader, tokenizer, max_len, device)
+    print(f'-- Validation Loss: {val_loss:.4f} -- Validation Accuracy: {val_accuracy:.4f}')
     
-    
-    
-def test_epoch(model, dataloader, tokenizer,device):
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+def test_epoch(model, dataloader, tokenizer, device):
     model.eval()
     total_accuracy = 0.0
     total_samples = 0

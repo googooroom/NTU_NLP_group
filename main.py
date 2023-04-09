@@ -8,10 +8,12 @@ from transformers import BertTokenizer, BertForSequenceClassification, BertConfi
 
 import argparse
 import sys
+import time
 
 from dataset import * 
 from train import *
 from model import *
+from utils import *
 
 def main(args):
 
@@ -23,25 +25,10 @@ def main(args):
     labels = 2
     print('--Load Models')
     # Create the model instance
-    if args.net == 'roberta':
-        pretrain_name = 'roberta-large'
-        config = RobertaConfig.from_pretrained(pretrain_name, num_labels=labels)
-        model = RobertaForSequenceClassification.from_pretrained(pretrain_name, config=config)
-        tokenizer = RobertaTokenizer.from_pretrained(pretrain_name)
-    elif args.net == 'gpt2':
-        pretrain_name = 'gpt2'
-        config = GPT2Config.from_pretrained(pretrain_name, num_labels=labels)
-        model = GPT2ForSequenceClassification.from_pretrained(pretrain_name, config=config)
-        tokenizer = GPT2Tokenizer.from_pretrained(pretrain_name)
-        tokenizer.pad_token = tokenizer.eos_token
-        model.resize_token_embeddings(len(tokenizer))
-        model.config.pad_token_id = model.config.eos_token_id
-
-    elif args.net == 'bert': # bert not tested
-        pretrain_name = 'bert-base-uncased'
-        config = BertConfig.from_pretrained(pretrain_name, num_labels=labels)
-        model = BertForSequenceClassification.from_pretrained(pretrain_name, config=config)
-        tokenizer = BertTokenizer.from_pretrained(pretrain_name)
+    pretrain_name = 'roberta-large'
+    config = RobertaConfig.from_pretrained(pretrain_name, num_labels=labels)
+    model = RobertaForSequenceClassification.from_pretrained(pretrain_name, config=config)
+    tokenizer = RobertaTokenizer.from_pretrained(pretrain_name)
 
     # config.num_labels = 2
 
@@ -62,13 +49,24 @@ def main(args):
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True, drop_last=False)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=args.epochs)
 
-    print('--Begin Training')
-    
-    train(model, train_loader, val_loader, optimizer, scheduler, tokenizer, args.max_len, args.epochs)
+    if args.baseline:
+        print('--Running Baseline')
+        evaluate_base(model, val_loader, args.max_len, tokenizer)
+    else:
+        print('--Begin Training')
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=args.epochs)
+
+        start_time = time.time()
+        train_result = train(model, train_loader, val_loader, optimizer, scheduler, tokenizer, args.max_len, args.epochs)
+        time_taken = start_time - time.time()
+        print(f"Training Time: {time_taken:.2f}")
+
+        plotter(train_result, args.fig_name)
+
+        np.savez(os.path.join('./diagram', args.fig_name.replace('.png ', '.npz')), train_loss=train_result['train_loss'], val_loss=train_result['val_loss'], train_acc=train_result['train_acc'], val_acc=train_result['val_acc'])
+
     if args.test:
         test_dataset = TweetDisasterDataset(args.test_path)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True, drop_last=False)
@@ -93,6 +91,8 @@ def parse_args(args):
 
     parser.add_argument("--test_path", type=str, default=None,
                         help="path to test data")
+    parser.add_argument('--fig_name',type=str, help='')
+
     # Model hyperparameters
     parser.add_argument("--max_len", type=int, default=64,
                         help="maximum sequence length for input tokens")
@@ -111,6 +111,8 @@ def parse_args(args):
     
     # apply --apply_soft_prompt will become true in cmd line
     parser.add_argument("--apply_soft_prompt", default=False, action='store_true',
+                    help="use soft prompt tuning")   
+    parser.add_argument("--baseline", default=False, action='store_true',
                     help="use soft prompt tuning")   
     
     parser.add_argument("--net", type=str, default='roberta',
