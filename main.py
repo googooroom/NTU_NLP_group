@@ -60,10 +60,10 @@ def main(args):
 
         start_time = time.time()
         train_result = train(model, train_loader, val_loader, optimizer, scheduler, tokenizer, args.max_len, args.epochs)
-        time_taken = start_time - time.time()
-        print(f"Training Time: {time_taken:.2f}")
+        time_min, time_sec = epoch_time(start_time, time.time())
+        print(f"Training Time: {time_min} min {time_sec} sec")
 
-        plotter(train_result, args.fig_name)
+        # plotter(train_result, args.fig_name)
 
         np.savez(os.path.join('./diagram', args.fig_name.replace('.png ', '.npz')), train_loss=train_result['train_loss'], val_loss=train_result['val_loss'], train_acc=train_result['train_acc'], val_acc=train_result['val_acc'])
 
@@ -115,8 +115,8 @@ def parse_args(args):
     parser.add_argument("--baseline", default=False, action='store_true',
                     help="use soft prompt tuning")   
     
-    parser.add_argument("--net", type=str, default='roberta',
-                    help="set the pretrained model [roberta, gpt2, bert-base-uncased]") 
+    # parser.add_argument("--net", type=str, default='roberta',
+    #                 help="set the pretrained model [roberta, gpt2, bert-base-uncased]") 
     
     args = parser.parse_args()
 
